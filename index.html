@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settler Survival Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            overflow-x: hidden;
+        }
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            max-width: 500px; /* Slightly larger for iPhone */
+        }
+        #canvas {
+            border: 1px solid black;
+            background-color: #ffffff;
+            width: 100%;
+            height: auto;
+            touch-action: manipulation; /* Improves touch responsiveness */
+        }
+        #ui {
+            margin-top: 10px;
+            text-align: center;
+            width: 100%;
+            max-width: 500px;
+        }
+        #resources {
+            font-size: 20px;
+            font-weight: bold;
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            margin-bottom: 10px;
+        }
+        button {
+            margin: 8px;
+            padding: 15px;
+            font-size: 18px;
+            width: 90%;
+            max-width: 300px;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            touch-action: manipulation;
+        }
+        button:active {
+            background-color: #45a049; /* Touch feedback */
+        }
+        #status {
+            font-size: 16px;
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="canvas" width="500" height="500"></canvas> <!-- Larger canvas -->
+    </div>
+    <div id="ui">
+        <div id="resources">Food: 50 | Wood: 50 | Settlers: 5</div>
+        <button onclick="selectBuilding('house')">Buy House (10 Wood)</button>
+        <button onclick="selectBuilding('farm')">Buy Farm (5 Wood)</button>
+        <button onclick="selectBuilding('lumber')">Buy Lumber Mill (5 Wood)</button>
+        <button onclick="selectBuilding('mine')">Buy Mine (10 Wood)</button>
+        <button onclick="upgradeSelected()">Upgrade Selected (Varies)</button>
+        <button onclick="expandLand()">Expand Land (20 Food, 20 Wood)</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const gridSize = 25; // Larger cells for visibility
+        let mapSize = 10; // Initial 10x10 grid
+        let fullMapSize = 20; // Full potential map
+        let map = Array.from({ length: fullMapSize }, () => Array(fullMapSize).fill({ type: 'grass', pathWear: 0, building: null, level: 1 }));
+
+        // Lock initial land beyond mapSize
+        for (let i = mapSize; i < fullMapSize; i++) {
+            for (let j = 0; j < fullMapSize; j++) {
+                map[i][j].type = 'locked';
+                map[j][i].type = 'locked';
+            }
+        }
+
+        let settlers = 5;
+        let food = 50;
+        let wood = 50;
+        let selectedBuilding = null;
+        let selectedCell = null;
+        let placingMode = false;
+
+        // Building costs and productions
+        const buildings = {
+            house: { cost: { wood: 10 }, production: { settlers: 1 }, upgradeCost: { wood: 5, food: 5 }, upgradeBonus: 1 },
+            farm: { cost: { wood: 5 }, production: { food: 2 }, upgradeCost: { wood: 5 }, upgradeBonus: 1 },
+            lumber: { cost: { wood: 5 }, production: { wood: 2 }, upgradeCost: { wood: 5 }, upgradeBonus: 1 },
+            mine: { cost: { wood: 10 }, production: { wood: 1, food: 1 }, upgradeCost: { wood: 10 }, upgradeBonus: 1 }
+        };
+
+        // Game loop
+        setInterval(gameTick, 5000);
+        setInterval(draw, 100);
+
+        function gameTick() {
+            for (let i = 0; i < mapSize; i++) {
+                for (let j = 0; j < mapSize; j++) {
+                    const cell = map[i][j];
+                    if (cell.building) {
+                        const b = buildings[cell.building];
+                        if (b.production.food) food += b.production.food * cell.level;
+                        if (b.production.wood) wood += b.production.wood * cell.level;
+                        if (b.production.settlers && Math.random() < 0.2) {
+                            settlers += b.production.settlers * cell.level;
+                            updateResources();
+                        }
+                    }
+                }
+            }
+
+            // Simulate settler movement for paths
+            for (let s = 0; s < settlers; s++) {
+                const startX = Math.floor(Math.random() * mapSize);
+                const startY = Math.floor(Math.random() * mapSize);
+                const endX = Math.floor(Math.random() * mapSize);
+                const endY = Math.floor(Math.random() * mapSize);
+                const steps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
+                for (let step = 0; step <= steps; step++) {
+                    const x = Math.round(startX + (endX - startX) * (step / steps));
+                    const y = Math.round(startY + (endY - startY) * (step / steps));
+                    if (map[x][y].type !== 'locked') {
+                        map[x][y].pathWear = Math.min(map[x][y].pathWear + 1, 10);
+                    }
+                }
+            }
+
+            updateResources();
+            draw();
+        }
+
+        function selectBuilding(type) {
+            selectedBuilding = type;
+            placingMode = true;
+            document.getElementById('status').innerText = `Tap on map to place ${type}.`;
+        }
+
+        function placeBuilding(x, y) {
+            if (!placingMode || map[x][y].building || map[x][y].type === 'locked') return;
+            const cost = buildings[selectedBuilding].cost;
+            if (wood >= cost.wood) {
+                wood -= cost.wood;
+                map[x][y].building = selectedBuilding;
+                map[x][y].level = 1;
+                placingMode = false;
+                selectedBuilding = null;
+                document.getElementById('status').innerText = '';
+                updateResources();
+                draw();
+            } else {
+                document.getElementById('status').innerText = 'Not enough wood!';
+            }
+        }
+
+        function upgradeSelected() {
+            if (!selectedCell) {
+                document.getElementById('status').innerText = 'Select a building to upgrade.';
+                return;
+            }
+            const cell = map[selectedCell.x][selectedCell.y];
+            if (!cell.building) return;
+            const b = buildings[cell.building];
+            const cost = b.upgradeCost;
+            let canUpgrade = true;
+            if (cost.wood && wood < cost.wood * cell.level) canUpgrade = false;
+            if (cost.food && food < cost.food * cell.level) canUpgrade = false;
+            if (canUpgrade) {
+                if (cost.wood) wood -= cost.wood * cell.level;
+                if (cost.food) food -= cost.food * cell.level;
+                cell.level += b.upgradeBonus;
+                selectedCell = null;
+                updateResources();
+                draw();
+            } else {
+                document.getElementById('status').innerText = 'Not enough resources!';
+            }
+        }
+
+        function expandLand() {
+            if (food >= 20 && wood >= 20 && mapSize < fullMapSize) {
+                food -= 20;
+                wood -= 20;
+                mapSize += 2;
+                for (let i = 0; i < mapSize; i++) {
+                    for (let j = mapSize - 2; j < mapSize; j++) {
+                        map[i][j].type = 'grass';
+                        map[j][i].type = 'grass';
+                    }
+                }
+                updateResources();
+                draw();
+            } else {
+                document.getElementById('status').innerText = 'Not enough resources or max size reached!';
+            }
+        }
+
+        function updateResources() {
+            document.getElementById('resources').innerText = `Food: ${food} | Wood: ${wood} | Settlers: ${settlers}`;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const cellWidth = canvas.width / mapSize;
+            const cellHeight = canvas.height / mapSize;
+
+            for (let i = 0; i < mapSize; i++) {
+                for (let j = 0; j < mapSize; j++) {
+                    const cell = map[i][j];
+                    ctx.fillStyle = cell.type === 'locked' ? '#808080' : '#90ee90';
+                    ctx.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+
+                    if (cell.pathWear > 0) {
+                        ctx.fillStyle = `rgba(139, 69, 19, ${cell.pathWear / 10})`;
+                        ctx.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                    }
+
+                    if (cell.building) {
+                        ctx.fillStyle = getBuildingColor(cell.building);
+                        ctx.fillRect(i * cellWidth + 2, j * cellHeight + 2, cellWidth - 4, cellHeight - 4);
+                        ctx.fillStyle = 'black';
+                        ctx.font = '12px Arial';
+                        ctx.fillText(cell.level, i * cellWidth + cellWidth / 2, j * cellHeight + cellHeight / 2);
+                    }
+
+                    ctx.strokeStyle = '#ddd';
+                    ctx.strokeRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                }
+            }
+
+            ctx.fillStyle = 'blue';
+            for (let s = 0; s < settlers; s++) {
+                const x = Math.floor(Math.random() * mapSize);
+                const y = Math.floor(Math.random() * mapSize);
+                ctx.beginPath();
+                ctx.arc(x * cellWidth + cellWidth / 2, y * cellHeight + cellHeight / 2, 4, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+
+        function getBuildingColor(type) {
+            switch (type) {
+                case 'house': return 'brown';
+                case 'farm': return 'yellow';
+                case 'lumber': return 'green';
+                case 'mine': return 'gray';
+                default: return 'black';
+            }
+        }
+
+        // Handle touch/click
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / (rect.width / mapSize));
+            const y = Math.floor((e.clientY - rect.top) / (rect.height / mapSize));
+            if (placingMode) {
+                placeBuilding(x, y);
+            } else {
+                selectedCell = { x, y };
+                document.getElementById('status').innerText = `Selected cell (${x},${y}) with ${map[x][y].building || 'nothing'}.`;
+            }
+        });
+
+        updateResources();
+        draw();
+    </script>
+</body>
+</html>
